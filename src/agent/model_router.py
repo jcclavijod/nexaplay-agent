@@ -15,9 +15,9 @@ class TaskType(Enum):
 
 
 _DEFAULT_MODELS: dict[TaskType, str] = {
-    TaskType.PLANNING: "claude-sonnet-4-20250514",
-    TaskType.REASONING: "claude-sonnet-4-20250514",
-    TaskType.CODEGEN: "claude-sonnet-4-20250514",
+    TaskType.PLANNING: "claude-sonnet-4-5",
+    TaskType.REASONING: "claude-sonnet-4-5",
+    TaskType.CODEGEN: "claude-sonnet-4-5",
     TaskType.SUMMARIZATION: "claude-haiku-4-5-20251001",
 }
 

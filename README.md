@@ -62,6 +62,8 @@ Variables opcionales con sus valores por defecto:
 | `MODEL_CODEGEN` | `claude-sonnet-4-5` | Modelo Claude para generación de código |
 | `MODEL_SUMMARIZATION` | `claude-haiku-4-5-20251001` | Modelo Claude para resúmenes |
 
+> **Nota sobre versión de modelos:** La prueba técnica original especificaba el uso de modelos Claude 4 (ej. `claude-sonnet-4-20250514`). Sin embargo, Anthropic deprecó esa generación de modelos poco después de publicarse el enunciado, por lo que se migraron los defaults a **Claude 4.5** (`claude-sonnet-4-5`, `claude-haiku-4-5-20251001`), que son los sucesores directos y funcionalmente equivalentes. Las variables de entorno `MODEL_*` permiten apuntar a cualquier versión si se requiere reproducir el comportamiento exacto de la prueba.
+
 ## Uso
 
 ```bash

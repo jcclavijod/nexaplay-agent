@@ -1,3 +1,3 @@
 # Video de demostración
 
-[Pega aquí el link de Loom o YouTube unlisted antes de entregar]
+https://www.loom.com/share/7a5645c96e494226b93ce464519ad9b0

@@ -1,0 +1,284 @@
+openapi: 3.0.3
+info:
+  title: NexaPlay Mock API
+  description: |
+    API mock para la prueba técnica Vora — Agente AI-Native.
+    Simula el sistema de administración de servicios digitales de NexaPlay.
+  version: 1.0.0
+  contact:
+    name: Felipe Mejía Villegas
+    email: felipe.mejia@vora.software
+
+servers:
+  - url: https://nexaplay-mock-production.up.railway.app
+    description: Mock server (Railway)
+
+paths:
+  /services/{id}/config:
+    get:
+      summary: Obtener configuración de un servicio
+      description: |
+        Devuelve la configuración actual de un servicio para una empresa cliente
+        y país específicos. Incluye parámetros operativos, reglas de negocio y límites.
+        
+        **Caso de prueba:** Servicio 42, cliente MX-01 — el campo `operational_limit`
+        arranca en 92, por debajo del `min_allowed` de 95. El agente debe detectarlo
+        y actualizarlo al `standard_value` de 96.
+      operationId: getServiceConfig
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "42"
+        - name: client_id
+          in: query
+          required: false
+          schema:
+            type: string
+            default: MX-01
+          example: MX-01
+        - name: country
+          in: query
+          required: false
+          schema:
+            type: string
+            default: MX
+          example: MX
+      responses:
+        "200":
+          description: Configuración del servicio
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceConfigResponse"
+              example:
+                success: true
+                data:
+                  service_id: "42"
+                  client_id: MX-01
+                  country: MX
+                  operational_limit: 92
+                  min_allowed: 95
+                  standard_value: 96
+                  max_transactions_per_second: 200000
+                  business_rules:
+                    retry_enabled: true
+                    max_retries: 3
+                    timeout_ms: 5000
+                    idempotency_window_sec: 300
+                  metadata:
+                    created_at: "2026-05-19T00:00:00.000Z"
+                    updated_at: "2026-05-19T00:00:00.000Z"
+                    version: 1
+
+    post:
+      summary: Actualizar configuración de un servicio
+      description: |
+        Actualiza uno o varios parámetros de configuración del servicio para una
+        empresa cliente y país. Soporta idempotencia via header `Idempotency-Key`.
+        
+        Campos actualizables: `operational_limit`, `max_transactions_per_second`,
+        `business_rules`.
+      operationId: updateServiceConfig
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "42"
+        - name: client_id
+          in: query
+          required: false
+          schema:
+            type: string
+            default: MX-01
+        - name: country
+          in: query
+          required: false
+          schema:
+            type: string
+            default: MX
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: UUID único por operación. Previene ejecuciones duplicadas (ventana 5 min).
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ServiceConfigUpdate"
+            example:
+              operational_limit: 96
+      responses:
+        "200":
+          description: Configuración actualizada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceConfigUpdateResponse"
+              example:
+                success: true
+                data:
+                  service_id: "42"
+                  client_id: MX-01
+                  country: MX
+                  previous:
+                    operational_limit: 92
+                  updated:
+                    operational_limit: 96
+                  timestamp: "2026-05-19T21:00:00.000Z"
+                  version: 2
+
+  /events/stream:
+    get:
+      summary: Stream de eventos en tiempo real (SSE)
+      description: |
+        Devuelve un flujo continuo de eventos del sistema usando Server-Sent Events (SSE).
+        Emite 10 eventos por segundo agrupados en arrays JSON.
+        
+        El agente debe generar código de ingesta que procese este flujo
+        sin perder eventos ni saturar memoria.
+      operationId: getEventsStream
+      responses:
+        "200":
+          description: Stream SSE activo
+          headers:
+            Content-Type:
+              schema:
+                type: string
+                example: text/event-stream
+            Cache-Control:
+              schema:
+                type: string
+                example: no-cache
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              example: |
+                data: [{"event_id":"uuid","type":"config_change","service_id":42,"operator":"OP-01","country":"MX","value":96,"timestamp":"2026-05-19T21:00:00.000Z"}]
+
+  /health:
+    get:
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Servidor activo
+          content:
+            application/json:
+              example:
+                status: ok
+                service: NexaPlay Mock API
+                version: 1.0.0
+                timestamp: "2026-05-19T21:00:00.000Z"
+
+components:
+  schemas:
+    ServiceConfigResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/ServiceConfig"
+
+    ServiceConfig:
+      type: object
+      properties:
+        service_id:
+          type: string
+        client_id:
+          type: string
+        country:
+          type: string
+        operational_limit:
+          type: integer
+          description: Valor actual. Si está por debajo de min_allowed, debe actualizarse.
+        min_allowed:
+          type: integer
+          description: Valor mínimo permitido (95)
+        standard_value:
+          type: integer
+          description: Valor estándar al que se debe actualizar (96)
+        max_transactions_per_second:
+          type: integer
+        business_rules:
+          $ref: "#/components/schemas/BusinessRules"
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+
+    BusinessRules:
+      type: object
+      properties:
+        retry_enabled:
+          type: boolean
+        max_retries:
+          type: integer
+        timeout_ms:
+          type: integer
+        idempotency_window_sec:
+          type: integer
+
+    Metadata:
+      type: object
+      properties:
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+
+    ServiceConfigUpdate:
+      type: object
+      properties:
+        operational_limit:
+          type: integer
+        max_transactions_per_second:
+          type: integer
+        business_rules:
+          $ref: "#/components/schemas/BusinessRules"
+
+    ServiceConfigUpdateResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            service_id:
+              type: string
+            client_id:
+              type: string
+            country:
+              type: string
+            previous:
+              type: object
+              properties:
+                operational_limit:
+                  type: integer
+            updated:
+              type: object
+              properties:
+                operational_limit:
+                  type: integer
+            timestamp:
+              type: string
+              format: date-time
+            version:
+              type: integer
+        idempotent:
+          type: boolean
+          description: true si la respuesta fue servida desde caché de idempotencia

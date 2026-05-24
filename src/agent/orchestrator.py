@@ -217,6 +217,13 @@ class Orchestrator:
             except json.JSONDecodeError:
                 result_data = {"success": False, "error": "PARSE_ERROR", "raw": raw_result}
 
+            if step.tool == "code_generator":  # DEBUG_TEMP
+                logger.debug(  # DEBUG_TEMP
+                    "CODEGEN_ORCHESTRATOR_RESULT keys=%s dump=%r",  # DEBUG_TEMP
+                    list(result_data.keys()),  # DEBUG_TEMP
+                    {k: str(v)[:200] for k, v in result_data.items()},  # DEBUG_TEMP
+                )  # DEBUG_TEMP
+
             # --- Observation --------------------------------------------
             obs = Observation(
                 step_id=step.id,

@@ -8,31 +8,55 @@ from pathlib import Path
 from typing import Literal
 
 import anthropic
+import logging  # DEBUG_TEMP
+
+logger = logging.getLogger(__name__)  # DEBUG_TEMP
 
 # Fallback inline si src/agent/prompts/codegen.md aún no existe.
 CODEGEN_PROMPT = """\
-Eres un experto en desarrollo de software. Genera código de alta calidad para el \
-siguiente requerimiento.
+Eres un generador de módulos de código de producción. Recibes un requerimiento
+funcional y un contexto técnico que describe el schema real de la API.
 
-## Contexto técnico
-```json
+
+# REGLAS INNEGOCIABLES (HIGHEST PRIORITY)
+- NO uses markdown
+- NO uses ``` fences
+- NO agregues texto antes o después del JSON
+- NO expliques nada
+- SOLO responde con JSON válido
+- El JSON debe ser parseable directamente con json.loads()
+- 
+# Reglas de ingeniería
+- Usa únicamente campos presentes en `technical_context`. Si un campo no está,
+  no lo inventes.
+- Genera código que pase mypy estricto en Python o tsc strict en TypeScript.
+- Incluye type hints / tipos explícitos en toda firma pública.
+- Incluye al menos un test unitario que valide el camino feliz y un camino
+  de error.
+- Comentarios en español, identificadores en inglés.
+- Para Python: usa `httpx`, `pydantic`, `pytest`. No traigas dependencias nuevas.
+- Para TypeScript: usa `fetch` nativo, sin axios.
+
+# Formato de salida
+Responde exactamente en este formato JSON, sin markdown, sin texto extra:
+
+{
+  "filename": "string — nombre sugerido del archivo, ej. service_config_updater.py",
+  "code": "string — código completo del módulo, listo para ejecutarse",
+  "test": "string — código completo del test unitario",
+  "summary": "string — 2-3 frases en español describiendo qué hace el módulo"
+}
+
+
+
+# Contexto técnico (schema real)
 {technical_context}
-```
 
-## Requerimiento
-{requirement}
+# Requerimiento
+<user_requirement>{requirement}</user_requirement>
 
-## Lenguaje objetivo
+# Lenguaje objetivo
 {language}
-
-Responde ÚNICAMENTE con un objeto JSON válido con estas keys exactas:
-- "filename": nombre de archivo sugerido (ej: "service_validator.py")
-- "code": el código completo, listo para ejecutar, sin bloques markdown
-- "test": suite de tests unitarios para el código generado, sin bloques markdown
-- "summary": descripción breve en español de qué hace el código (1-2 oraciones)
-
-No incluyas backticks, markdown fences ni texto fuera del JSON. \
-El JSON debe ser parseable directamente con json.loads().
 """
 
 _PROMPT_PATH = Path(__file__).parents[2] / "agent" / "prompts" / "codegen.md"
@@ -86,9 +110,13 @@ def _clean_response(text: str) -> str:
     Returns:
         Texto sin fences, listo para parsear como JSON.
     """
-    stripped = text.strip()
-    m = _FENCE_RE.match(stripped)
-    return m.group(1).strip() if m else stripped
+    text = text.strip()
+
+    # Quitar fences si existen
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+
+    return text.strip()
 
 
 def _parse_response(raw: str) -> dict:
@@ -104,10 +132,44 @@ def _parse_response(raw: str) -> dict:
         json.JSONDecodeError: Si el contenido no es JSON válido.
         ValueError: Si faltan keys obligatorias en el resultado.
     """
-    result = json.loads(_clean_response(raw))
-    missing = _REQUIRED_KEYS - result.keys()
+    required = {"filename", "code", "test", "summary"}
+
+    cleaned = _clean_response(raw)
+
+    # 1. Intento directo (caso ideal)
+    try:
+        result = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # 2. Fallback: extraer JSON por balance de llaves
+        start = cleaned.find("{")
+        if start == -1:
+            raise RuntimeError(f"GENERATION_FAILED: No JSON found\nRAW={raw[:800]}")
+
+        brace = 0
+        end = -1
+
+        for i in range(start, len(cleaned)):
+            if cleaned[i] == "{":
+                brace += 1
+            elif cleaned[i] == "}":
+                brace -= 1
+                if brace == 0:
+                    end = i
+                    break
+
+        if end == -1:
+            raise RuntimeError(f"GENERATION_FAILED: Unbalanced JSON\nRAW={raw[:800]}")
+
+        try:
+            result = json.loads(cleaned[start:end + 1])
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"GENERATION_FAILED: Invalid JSON\nRAW={raw[:800]}") from exc
+
+    # 3. Validación de keys
+    missing = required - result.keys()
     if missing:
-        raise ValueError(f"Faltan keys en la respuesta de Claude: {missing}")
+        raise ValueError(f"Missing keys: {missing}")
+
     return result
 
 
@@ -137,13 +199,23 @@ async def _call_claude(client: anthropic.AsyncAnthropic, prompt: str) -> str:
     Returns:
         Texto de la respuesta del modelo (primer bloque de contenido).
     """
-    response = await client.messages.create(
+    
+    api_response = await client.messages.create(
         model=_MODEL,
         max_tokens=4096,
         temperature=0,
         messages=[{"role": "user", "content": prompt}],
     )
-    return response.content[0].text
+
+    logger.debug("CLAUDE_RESPONSE_CONTENT=%r", api_response.content)
+
+    parts = []
+
+    for block in api_response.content:
+        if hasattr(block, "text"):
+            parts.append(block.text)
+
+    return "\n".join(parts)
 
 
 async def generate(
@@ -181,9 +253,17 @@ async def generate(
 
     # Primer intento: generación base.
     raw = await _call_claude(client, base_prompt)
+    logger.debug("CODEGEN_RAW_RESPONSE len=%d text=%r", len(raw), raw[:800])  # DEBUG_TEMP
     try:
         result = _parse_response(raw)
     except (json.JSONDecodeError, ValueError) as exc:
+        logger.debug("CODEGEN_PARSE_ERROR_FIRST_ATTEMPT error=%r", exc)  # DEBUG_TEMP
+        try:  # DEBUG_TEMP
+            Path.home().joinpath("codegen_raw_fail.txt").write_text(  # DEBUG_TEMP
+                f"ERROR: {exc}\n\nRAW ({len(raw)} chars):\n{raw}", encoding="utf-8"  # DEBUG_TEMP
+            )  # DEBUG_TEMP
+        except Exception:  # DEBUG_TEMP
+            pass  # DEBUG_TEMP
         raise RuntimeError("GENERATION_FAILED") from exc
 
     # Validación de sintaxis Python; TypeScript no se puede validar sin parser externo.
@@ -195,11 +275,13 @@ async def generate(
         return result
 
     # Reintento con contexto de error de sintaxis.
+    logger.debug("CODEGEN_SYNTAX_RETRY_TRIGGERED parse_error=%r", parse_error)  # DEBUG_TEMP
     retry_prompt = (
         base_prompt
         + f"\n\nEl intento anterior produjo código no parseable: {parse_error}. Corrige."
     )
     raw2 = await _call_claude(client, retry_prompt)
+    logger.debug("CODEGEN_RETRY_RAW_RESPONSE len=%d text=%r", len(raw2), raw2[:800])  # DEBUG_TEMP
     try:
         result = _parse_response(raw2)
     except (json.JSONDecodeError, ValueError) as exc:

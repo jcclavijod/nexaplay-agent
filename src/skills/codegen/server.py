@@ -21,11 +21,6 @@ server = Server("code-generator")
 
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
-    """Registra las tools expuestas por este server MCP.
-
-    Returns:
-        Lista con la tool ``code_generator`` y su schema de inputs.
-    """
     return [
         types.Tool(
             name="code_generator",
@@ -61,11 +56,6 @@ async def list_tools() -> list[types.Tool]:
 
 @server.list_resources()
 async def list_resources() -> list[types.Resource]:
-    """Registra los resources expuestos por este server MCP.
-
-    Returns:
-        Lista con el resource ``codegen://style-guide``.
-    """
     return [
         types.Resource(
             uri=types.AnyUrl("codegen://style-guide"),  # type: ignore[arg-type]
@@ -78,17 +68,6 @@ async def list_resources() -> list[types.Resource]:
 
 @server.read_resource()
 async def read_resource(uri: types.AnyUrl) -> str:
-    """Lee el contenido de un resource por URI.
-
-    Args:
-        uri: URI del resource a leer. Solo se acepta ``"codegen://style-guide"``.
-
-    Returns:
-        Contenido del resource como string.
-
-    Raises:
-        ValueError: Si la URI no corresponde a ningún resource registrado.
-    """
     if str(uri) != "codegen://style-guide":
         raise ValueError(f"Resource desconocido: {uri}")
     return _STYLE_GUIDE
@@ -96,20 +75,6 @@ async def read_resource(uri: types.AnyUrl) -> str:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    """Despacha la invocación de una tool y retorna el resultado como JSON.
-
-    Args:
-        name: Nombre de la tool a invocar. Solo se acepta ``"code_generator"``.
-        arguments: Argumentos de la tool según su ``inputSchema``.
-
-    Returns:
-        Lista con un único :class:`~mcp.types.TextContent` cuyo texto es un JSON
-        con ``success=True`` y los campos del resultado, o ``success=False`` y
-        ``error`` en caso de fallo.
-
-    Raises:
-        ValueError: Si ``name`` no corresponde a ninguna tool registrada.
-    """
     if name != "code_generator":
         raise ValueError(f"Tool desconocida: {name}")
 
@@ -134,11 +99,6 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
 
 async def main() -> None:
-    """Punto de entrada del server MCP en modo stdio.
-
-    Carga las variables de entorno con ``dotenv`` e inicia el loop de
-    lectura/escritura stdio hasta que el cliente cierre la conexión.
-    """
     from dotenv import load_dotenv
 
     load_dotenv()
